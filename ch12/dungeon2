@@ -1,0 +1,33 @@
+;;;;
+;;;;             Q  P  O
+;;;;             A     D2
+;;;;    M     B  C  D1 D  D3
+;;;;    L  K  J        E
+;;;;    N           G  F  H
+;;;;                      I
+;;;;                   
+
+;;;;
+;;;;    Test path-finding code.
+;;;;    
+(initialize-dungeon)
+(add-room a "" nil nil ((south c)))
+(add-room b "" nil nil ((east c) (south j)))
+(add-room c "" nil nil ((north a) (west b) (east d1)))
+(add-room d "" nil nil ((north d2) (east d3) (west d1) (south e)))
+(add-room d1 "" nil nil ((west c) (east d)))
+(add-room d2 "" nil nil ((north o) (south d)))
+(add-room d3 "" nil nil ((west d)))
+(add-room e "" nil nil ((north d) (south f)))
+(add-room f "" nil nil ((north e) (west g) (east h)))
+(add-room g "" nil nil ((east f)))
+(add-room h "" nil nil ((west f) (south i)))
+(add-room i "" nil nil ((north h)))
+(add-room j "" nil nil ((north b) (west k)))
+(add-room k "" nil nil ((west l) (east j)))
+(add-room l "" nil nil ((north m) (east k) (south n)))
+(add-room m "" nil nil ((south l)))
+(add-room n "" nil nil ((north l)))
+(add-room o "" nil nil ((west p) (south d2)))
+(add-room p "" nil nil ((west q) (east o)))
+(add-room q "" nil nil ((east p) (south a)))

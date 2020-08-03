@@ -1,0 +1,509 @@
+;#!/usr/local/bin/clisp
+;;;    Hey, Emacs, this is a -*- Mode: Lisp; Syntax: Common-Lisp -*- file!
+;;;
+;;;   NAME:               objects.lisp
+;;;
+;;;   STARTED:            Tue Aug  6 19:11:55 2002
+;;;   MODIFICATIONS:
+;;;
+;;;   PURPOSE:
+;;;
+;;;
+;;;
+;;;   CALLING SEQUENCE:
+;;;
+;;;
+;;;   INPUTS:
+;;;
+;;;   OUTPUTS:
+;;;
+;;;   EXAMPLE:
+;;;
+;;;   NOTES:
+;;;
+;;;
+
+;(provide "bobjects")
+
+(defstruct (generic-type (:conc-name nil)
+			 (:print-function object-printer))
+  object-type
+  parents)
+
+(defun object-printer (object stream depth)
+  (let ((type-name (object-type object)))
+    (format stream "#<Object ~S" type-name)
+    (print-printables type-name stream object (printables type-name))))
+
+(defun print-printables (type-name stream object slots)
+  (cond (slots (format stream " ~S=~S" (car slots)
+		       (funcall (get-actual-name (car slots) type-name)
+				object))
+	       (print-printables type-name stream object (cdr slots)))
+	(t (format stream ">"))))
+
+;(defvar *code-to-be-evaluated* nil) ;;;Put this in a closure!
+
+;;;
+;;;    WTF?!
+;;;
+;;;    Why does this execute all of these functions and then return a macro
+;;;    expansion which executes them again?!
+;;;    
+(defmacro define-type (type-name &rest slots)
+;  (let ((*code-to-be-evaluated* nil)
+  (let ((code-to-be-evaluated nil)
+	(options (extract-type-options slots)))
+    (declare (special code-to-be-evaluated))
+;     (initialize-type type-name)
+;     (determine-inheritor type-name options)
+;     (eval `(defstruct (,type-name (:print-function object-printer)
+; 		                  (:include generic-type
+; 				   (object-type ',type-name)))
+; 	     ,@(process-slots type-name (extract-slots slots) options)))
+;     (store-typep type-name)
+    `(let (slots
+	   (type-name ',type-name))
+       (initialize-type ',type-name)
+       (determine-inheritor ',type-name ',options)
+       (setf slots (process-slots ',type-name
+		                  (extract-slots ',slots)
+		                  ',options))
+;        (defstruct (,type-name (:print-function object-printer)
+; 			      (:include generic-type
+; 					(object-type ',type-name)))
+; 	 ,@slots)
+       (eval `(defstruct (,type-name (:print-function object-printer)
+			             (:include generic-type
+				      (object-type ',type-name)))
+	        ,@slots))
+       (store-typep ',type-name)
+       ,@code-to-be-evaluated
+;       ,@*code-to-be-evaluated*
+       ',type-name)))
+
+(defun extract-slots (slots)
+  (cond ((null slots) ())
+	((type-optionp (car slots)) (extract-slots (cdr slots)))
+	(t (cons (car slots) (extract-slots (cdr slots)))) ))
+	    
+(defun extract-type-options (slots)
+  (cond ((null slots) ())
+	((type-optionp (car slots)) (cons (car slots)
+					  (extract-type-options (cdr slots))))
+	(t (extract-type-options (cdr slots)))) )
+
+;;;
+;;;    Should be DETERMINE-INHERITANCE?!
+;;;    
+(defun determine-inheritor (type-name options)
+  (let ((inherits (find-all :inherit-from options)))
+;(format t "determine-inheritor...~S ~S ~S~%" type-name options inherits)
+    (list-symbol-objectp inherits)
+    (store-parent type-name inherits)
+    inherits))
+
+(defun find-all (search pseudo-a-list)
+  (cond ((null pseudo-a-list) ())
+	((and (consp (car pseudo-a-list))
+	      (equal search (caar pseudo-a-list)))
+	 (append (cdar pseudo-a-list)
+		 (find-all search (cdr pseudo-a-list))))
+	(t (find-all search (cdr pseudo-a-list)))) )
+
+;;;
+;;;    Check whether all elements in list are legal types. Side-effect is to
+;;;    die if invalid type found.
+;;;    
+(defun list-symbol-objectp (list-of-types)
+  (cond ((null list-of-types) ())
+	((not (symbol-objectp (car list-of-types)))
+	 (error "~S is not a known type to inherit" (car list-of-types)))
+	(t (list-symbol-objectp (cdr list-of-types)))) )
+
+(defun process-slots (type-name slots options)
+  (if (null slots)
+      ()
+      (cons (let ((foo (process-slots-aux type-name (car slots) options)))
+;	      (format t "process-slots-aux returns: ~S~%" foo)
+	      foo)
+	    (process-slots type-name (cdr slots) options))))
+
+(defun process-slots-aux (type-name slot options)
+  (declare (special code-to-be-evaluated))
+  (let* ((slot-struct (parse-slot-description slot options)); type-name))
+	 (slot-name (slot-slot-name slot-struct))
+	 (method-access-name (build-separated-name type-name slot-name "-"))
+	 (method-set-name (build-separated-name 'set slot-name "-"))
+	 (method-set-function-name (build-separated-name type-name
+							 method-set-name
+							 "$")))
+    (store-slot-name type-name slot-name method-access-name)
+    (when (slot-gettable slot-struct)
+      (store-method-name type-name slot-name method-access-name)
+      (define-generic slot-name nil))
+    (when (slot-settable slot-struct)
+      (store-method-name type-name method-set-name method-set-function-name)
+      (define-generic method-set-name (list 'value-to-set))
+      (push `(defsetf ,slot-name ,method-set-name) code-to-be-evaluated)
+;      (push `(defsetf ,slot-name ,method-set-name) *code-to-be-evaluated*)
+      (push `(setf (symbol-function ',method-set-function-name)
+	           #'(lambda (object value)
+		       (setf (,method-access-name object) value)))
+	    code-to-be-evaluated))
+;	    *code-to-be-evaluated*))
+    (when (slot-initable slot-struct)
+      (store-initable type-name slot-name))
+    (when (slot-printable slot-struct)
+      (store-printable type-name slot-name))
+    (if (slot-initial-value slot-struct)
+	`(,slot-name ,(slot-initial-value slot-struct))
+	slot-name)))
+
+(defstruct slot
+  slot-name
+  (initial-value nil)
+  initable
+  settable
+  gettable
+  printable)
+
+;;;
+;;;    Why is TYPE-NAME needed for the following 2 functions?
+;;;    
+;(defun parse-slot-description (slot type-options type-name)
+(defun parse-slot-description (slot type-options)
+  (let ((slot-struct (make-slot :initable (member :all-initable
+						  type-options)
+				:settable (member :all-settable
+						  type-options)
+				:gettable (member :all-gettable
+						  type-options)
+				:printable (member :all-printable
+						   type-options))))
+    (parse-slot-description-aux slot-struct slot type-options)
+;    (parse-slot-description-aux slot-struct slot type-options type-name)
+    slot-struct))
+
+;(defun parse-slot-description-aux (slot-struct slot type-options type-name)
+(defun parse-slot-description-aux (slot-struct slot type-options)
+  (cond ((null slot) ())
+	((consp (car slot))
+	 (cond ((equal (caar slot) :init)
+		(setf (slot-initial-value slot-struct)
+		      (cadr (car slot)))
+		(parse-slot-description-aux slot-struct (cdr slot) type-options
+					    ))
+;					    type-name))
+	       (t (error "Unknown slot option ~S" (car slot)))) )
+	(t (case (car slot)
+	     (:initable (setf (slot-initable slot-struct) t))
+	     (:gettable (setf (slot-gettable slot-struct) t))
+	     (:settable (setf (slot-settable slot-struct) t))
+	     (:printable (setf (slot-printable slot-struct) t))
+	     (:var (setf (slot-slot-name slot-struct) (cadr slot))
+		   (setf slot (cdr slot))) ;We have extra element to ignore
+					   ;before recursively processing rest
+					   ;of list.
+	     (t (error "Unknown slot option ~S" (car slot))))
+	   (parse-slot-description-aux slot-struct (cdr slot) type-options
+				       ))))
+;				       type-name))))
+
+(defun build-separated-name (type-name slot separator)
+  (intern (concatenate 'string (symbol-name type-name) separator
+		       (symbol-name slot))))
+
+(defun type-optionp (type-option)
+  (or (member type-option '(:all-gettable :all-settable :all-initable))
+      (and (consp type-option)
+	   (member (car type-option) '(:inherit-from)))) )
+
+(defun initialize-type (type-name)
+;  (format t "initialize-type...~A~%" type-name)
+  (setf (get type-name 'slots) nil)
+  (setf (get type-name 'initable) nil)
+  (setf (get type-name 'typep) nil)
+  (setf (get type-name 'parent) nil)
+  (setf (get type-name 'methods) nil)
+  (setf (get type-name 'printable) nil))
+
+(defun get-method-names (type-name)
+  (get type-name 'methods))
+
+(defun get-actual-name (method-name type-name)
+  (cdr (assoc method-name (get-method-names type-name))))
+
+(defun store-method-name (type-name method-name access-name)
+  (setf (get type-name 'methods)
+	(cons (cons method-name access-name)
+	      (get type-name 'methods))))
+
+(defun merge-method-names (add-methods addee-methods)
+  (dolist (each-method (get-method-names add-methods))
+    (store-method-name addee-methods (car each-method) (cdr each-method))))
+
+(defun get-slot-names (type-name)
+  (get type-name 'slots))
+
+(defun store-slot-name(type-name slot-name slot-access-name)
+  (setf (get type-name 'slots)
+	(cons (cons slot-name slot-access-name)
+	      (get type-name 'slots))))
+
+(defun merge-slot-names (add-slots adee-slots)
+  (dolist (each-slot (get-slot-names add-slots))
+    (store-slot-name addee-slots (car each-slot) (cdr each-slot))))
+
+(defun get-initable (type-name)
+  (get type-name 'initable))
+
+(defun store-initable (type-name slot)
+  (setf (get type-name 'initable)
+	(cons (make-keyword slot)
+	      (get type-name 'initable))))
+
+(defun merge-initable-names (add-initable addee-initable)
+  (dolist (each-initable (get-initable add-initable))
+    (store-initable addee-initable each-initable)))
+
+(defun symbol-objectp (symbol)
+  (get symbol 'typep))
+
+(defun store-typep (type)
+  (setf (get type 'typep) t))
+
+(defun store-parent (type-name parent)
+  (setf (get type-name 'parent) parent))
+
+(defun get-parent (type-name)
+  (get type-name 'parent))
+
+(defun store-user-function (function-name user-function)
+  (setf (get function-name 'user-function) user-function))
+
+(defun user-function (function-name)
+  (get function-name 'user-function))
+
+(defun store-printable (type-name slot-name)
+  (setf (get type-name 'printable)
+	(adjoin slot-name (printables type-name))))
+
+(defun printables (type-name)
+  (get type-name 'printable))
+
+(defun objectp (object)
+  (typep object 'generic-type))
+
+(defun make-keyword (symbol)
+  (intern (symbol-name symbol) (find-package 'keyword)))
+
+(defun genericp (slot-function)
+  (get slot-function 'generic-function))
+
+(defun add-generic (slot-function)
+  (setf (get slot-function 'generic-function) t))
+
+(defun define-generic (method-name extra-args)
+  (unless (genericp method-name)
+    (create-generic-function method-name extra-args)
+    (add-generic method-name)))
+
+(defmacro create-generic-aux (method-name extra-args)
+  `#'(lambda (self ,extra-args)
+       (let ((user-fn (user-function ',method-name)))
+	 (cond ((objectp self)
+		(let* ((type-name (object-type self))
+		       (actual-name-and-self
+			(get-a-method ',method-name type-name self))
+		       (target-object (cdr actual-name-and-self))
+		       (actual-name (car actual-name-and-self)))
+		  (cond ((and user-fn (not actual-name))
+			 (setf actual-name user-fn)
+			 (setf target-object self))
+			((not actual-name)
+			 (error "~S is not a known method for ~S"
+				,method-name type-name)))  ;??
+		  (apply actual-name target-object ,extra-args)))
+;		  (funcall actual-name target-object ,extra-args)))
+	       (user-fn (apply user-fn (list self ,extra-args)))
+	       (t (error "~S is not an object, invoked with ~S"
+			 self ',method-name)))) ))
+
+(defun create-generic-function (method-name extra-args)
+  (let ((user-function (build-separated-name 'user method-name "$$")))
+    (when (and (fboundp method-name)
+	       (not (fboundp user-function)))
+      (store-user-function method-name user-function)
+      (setf (symbol-function user-function) (symbol-function method-name))))
+  (format t "~S~%" (macroexpand-1 '(create-generic-aux method-name extra-args)))
+
+  (setf (symbol-function method-name)
+	(create-generic-aux method-name extra-args)))
+;	(eval `(create-generic-aux ,method-name ,extra-args)))) ;?!?!?!?!?!?
+
+(defun get-a-method (method-name type-name self)
+  (let ((actual-name (get-actual-name method-name type-name)))
+    (cond ((not actual-name)
+	   (find-parent-method method-name (parents self)))
+	  (t (cons actual-name self)))) )
+
+(defun find-parent-method (method-name parent-list)
+  (cond ((null parent-list) ())
+	((get-a-method method-name (caar parent-list) (cdar parent-list)))
+	(t (find-parent-method method-name (cdr parent-list)))) )
+
+;;;
+;;;    Redefines MAKE-INSTANCE
+;;;    
+(defun make-instance-k (type-name &rest initial-options)
+  (cond ((not (symbol-objectp type-name))
+	 (error "~S is not a known type" type-name))
+	(t (verify-legal-options initial-options (find-initables type-name))
+	   (make-instance-aux type-name initial-options))))
+
+(defun make-instance-aux (type-name initial-options)
+  (let ((instance (apply (build-separated-name 'make type-name "-")
+			 (current-options initial-options type-name)))
+	(options-for-parents (parent-options initial-options type-name)))
+    (dolist (each-parent (get-parent type-name))
+;       (push (cons each-parent
+; 		  (make-instance-aux each-parent options-for-parents))
+; 	    (parents instance))
+      (setf (parents instance)
+	    (cons (cons each-parent
+			(make-instance-aux each-parent options-for-parents))
+		  (parents instance))))
+    instance))
+
+;;;
+;;;    Compare structure of following 2 functions
+;;;    
+(defun current-options (options type-name)
+  (cond ((null options) ())
+	((member (car options) (get-initable type-name))
+	 (cons (car options)
+	       (cons (cadr options)
+		     (current-options (cddr options) type-name))))
+	(t (current-options (cddr options) type-name))))
+
+(defun parent-options (options type-name)
+  (cond ((null options) ())
+	((member (car options) (get-initable type-name))
+	 (parent-options (cddr options) type-name))
+	(t (cons (car options)
+		 (cons (cadr options)
+		       (parent-options (cddr options) type-name)))) ))
+
+(defun find-initables (type-name)
+  (append (get-initable type-name)
+	  (find-initables-aux (get-parent type-name))))
+
+;;;
+;;;    Rewrite a la Graham's FLATTEN
+;;;    
+(defun find-initables-aux (parents)
+  (cond ((null parents) ())
+	(t (append (find-initables (car parents))
+		   (find-initables-aux (cdr parents)))) ))
+
+(defun verify-legal-options (option-list legal-options)
+  (cond ((null option-list) ())
+	((member (car option-list) legal-options)
+	 (verify-legal-options (cddr option-list) legal-options))
+	(t (error "~S is not an initable option" (car option-list)))) )
+
+(defmacro define-method ((type-name method-name) arg-list &body body)
+  (let ((method-function-name (build-separated-name type-name method-name "$")))
+    (when (not (symbol-objectp type-name))
+      (error "~S is not a known type" type-name))
+    (define-generic method-name arg-list)
+    (store-method-name type-name method-name method-function-name)
+    `(progn
+       (define-generic ',method-name ',arg-list)
+       (store-method-name ',type-name ',method-name ',method-function-name)
+       (defun ,method-function-name (self ,@arg-list)
+	 ,@(transform (copy-tree body)
+		      (get-slot-names type-name)))
+       ',method-name)))
+
+(defun transform (code slot-list)
+  (transform-sexprs code slot-list)
+  code)
+
+;;;
+;;;    Modified from book
+;;;    
+(defun transform-sexprs (code slot-list)
+  (cond ((null code) ())
+	((and (atom (car code))
+	      (assoc (car code) slot-list))
+	 (rplaca code `(,(cdr (assoc (car code) slot-list)) self))
+	 (transform-sexprs (cdr code) slot-list))
+	(t (transform-aux (car code) slot-list)
+	   (transform-sexprs (cdr code) slot-list))))
+
+(defun transform-aux (code slot-list)
+  (cond ((null code) ())
+	((atom code) code)
+	((eq (car code) 'quote) ())
+	((eq (car code) 'call-method)
+	 (rplacd code (cons 'self (cdr code)))
+	 (transform-operands (cdddr code) slot-list))
+	((listp (car code))
+	 (transform-aux (car code) slot-list)
+	 (transform-aux (cdr code) slot-list))
+	(t (transform-operands (cdr code) slot-list))))
+
+;;;
+;;;    Modified from book
+;;;    
+(defun transform-operands (code slot-list)
+  (cond ((null code) ())
+	((atom code) ())
+	((listp (car code))
+	 (transform-aux (car code) slot-list)
+	 (transform-operands (cdr code) slot-list))
+	((assoc (car code) slot-list)
+	 (rplaca code `(,(cdr (assoc (car code) slot-list)) self))
+	 (transform-operands (cdr code) slot-list))
+	(t (transform-operands (car code) slot-list)
+	   (transform-operands (cdr code) slot-list))))
+
+(defmacro call-method (object (typename methodname) &rest args)
+  `(call-method-internal ,object ',type-name ',methodname ,@args))
+
+(defun call-method-internal (object typename methodname &rest args)
+  (let ((parent-object (cdr (assoc typename (parents object)))) )
+    (when (not parent-object)
+      (error "~S does not have parent ~S" (object-type object) typename))
+    (apply methodname parent-object args)))
+
+;;;
+;;;    Redefines DESCRIBE
+;;;    
+(defun describe-k (obj)
+  (dolist (each-slot (get-slot-names (object-type obj)))
+    (format t " ~A: ~A~%" (car each-slot) (funcall (cdr each-slot) obj)))
+  (dolist (each-parent (parents obj))
+    (describe (cdr each-parent))))
+
+;;;
+;;;    Redefines DEFUN
+;;;
+(eval-when (load compile eval)
+  (unless (macro-function 'old-defun)
+    (format t "Defining old-defun~%")
+    (setf (macro-function 'old-defun)
+	  (macro-function 'defun)))
+  (defmacro defun-k (function-name arg-list &body body)
+    (cond ((or (not (fboundp 'genericp))
+	       (not (genericp function-name)))
+	   `(old-defun ,function-name ,arg-list ,@body))
+	  (t (let ((user-name (build-separated-name 'user function-name "$$")))
+	       `(progn
+		  (old-defun ,user-name ,arg-list ,@body)
+		  (store-user-function ',function-name ',user-name)
+		  ',function-name)))) ))
+
+  

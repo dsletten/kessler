@@ -1,0 +1,17 @@
+(initialize-dungeon)
+(add-room start "A small, unfomfortable cavern" nil (special)
+	  ((west terror-room)))
+(add-room terror-room "A dark and musty smelling room" (zombie)
+	  (club) ((north start) (south start) (east mist-room)))
+(add-room mist-room "It is all misty, you can't see very well"
+	  (swarm-1 swarm-2) (cannon) ((west terror-room) (east terror-room)
+				      (north exit)))
+(add-room exit "At last! A haven among the mists of doom" nil nil nil)
+(add-monster zombie zombie "A ghastly apparition, devoid of flesh" 5 5)
+(add-monster swarm-1 swarm "Number one of a deadly family of unkind beastes"
+	     10 10)
+(add-monster swarm-2 swarm "Number two of a deadly family of unkind beastes"
+	     10 10)
+(add-weapon special special "Trusty Saturday Night Special")
+(add-weapon cannon cannon "A cannon from the HMS Pinafore")
+(add-weapon club club "Large club with spikes protruding from the end")
