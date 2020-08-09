@@ -26,10 +26,9 @@
 ;;;;   Notes:
 ;;;;
 ;;;;
-;(load "/home/slytobias/lisp/packages/test.lisp")
-(load "/Users/dsletten/lisp/packages/test.lisp")
+(load "/home/slytobias/lisp/packages/test.lisp")
 
-(defpackage :ch03 (:use :common-lisp :test) (:shadow :assoc :reverse :nth))
+(defpackage :ch03 (:use :common-lisp :test) (:shadow :assoc :reverse :nth :mapcar))
 
 (in-package :ch03)
 
@@ -68,7 +67,7 @@
    (equal (reverse #5='((a 1) (b 2) (c 3) (d 4))) (cl:reverse #5#))))
   
 ;;;
-;;;    3.13
+;;;    3.13 (Compare 2002)
 ;;;    
 (defun super-reverse (l)
   (labels ((reverse-aux (l result)
@@ -277,3 +276,69 @@
      (equal (internal-to-external '(5 0 1 -4)) '(+ 5 (** z 2) (* -4 (** z 3)))) )
    (equal (internal-to-external '(5 0 1 -4)) '(+ 5 (** x 2) (* -4 (** x 3)))) ))
 
+;;;
+;;;    3.23
+;;;
+(defun mapcar (pred l)
+  (if (endp l)
+      '()
+      (cons (funcall pred (first l)) (mapcar pred (rest l)))) )
+
+(deftest test-mapcar ()
+  (check
+   (equal (mapcar #'evenp '()) '())
+   (equal (mapcar #'evenp '(1 2 3 4)) '(nil t nil t))))
+
+;;;
+;;;    3.24
+;;;    
+(defun gzorp (operator operand1 operand2)
+  (funcall (lookup operator) operand1 operand2))
+
+(defun lookup (operator)
+  (ecase operator
+    (greeble #'+)
+    (ngreeble #'-)
+    (prozg #'*)))
+
+(deftest test-gzorp ()
+  (check
+   (= (gzorp 'prozg . #1=(34 -4)) (* . #1#))
+   (= (gzorp 'ngreeble . #2=(22 -22)) (- . #2#))
+   (= (gzorp 'greeble . #3=(79 14)) (+ . #3#))))
+
+;;;
+;;;    Chapter Exercises
+;;;
+;;;    From ch. 2
+;;;
+(defun quadratic (a b c)
+  (assert (every #'numberp (list a b c)) (a b c) "A, B, and C must all be numbers.")
+  (symbol-macrolet ((discriminant (- (* b b) (* 4 a c))))
+    (assert (not (minusp discriminant)) (a b c) "Discriminant must be non-negative.")
+    (values (/ (+ (- b) (sqrt discriminant)) (* 2 a))
+            (/ (- (- b) (sqrt discriminant)) (* 2 a)))) )
+
+;;;
+;;;    Ex. 2
+;;;    
+(defun factors (p)
+  (destructuring-bind (c b a) p
+    (let ((roots (multiple-value-list (quadratic a b c))))
+      (cl:mapcar #'(lambda (root) (list (- (numerator root)) (denominator root))) (sort roots #'<)))) )
+
+(deftest test-factors ()
+  (check
+   (equal (factors '(-6 1 1)) '((3 1) (-2 1)))
+   (equal (factors '(-18 -7 1)) '((2 1) (-9 1)))
+   (equal (factors '(-15 2 1)) '((5 1) (-3 1)))
+   (equal (factors '(14 9 1)) '((7 1) (2 1)))
+   (equal (factors '(3 -8 4)) '((-1 2) (-3 2)))
+   (equal (factors '(-4 -11 3)) '((1 3) (-4 1)))
+   (equal (factors '(2 7 6)) '((2 3) (1 2)))) )
+
+
+
+
+      
+  
