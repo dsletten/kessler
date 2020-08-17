@@ -127,6 +127,16 @@
                    (t (malformed)))) )
     (start tokens)))
 
+(deftest test-infix-to-prefix ()
+  (check
+   (equal (infix-to-prefix '(55)) '(55))
+   (equal (infix-to-prefix '(-34 * x)) '((* -34 (** x 1))))
+   (equal (infix-to-prefix '(3 * x ** 2 + 7 * x + 8)) '(8 (* 7 (** X 1)) (* 3 (** X 2))))
+   (equal (infix-to-prefix '(x ** 3 - 5 * x ** 2 - 17)) '(-17 (* -5 (** X 2)) (* 1 (** X 3))))
+   (equal (infix-to-prefix '(x ** 3 - 4 * x ** 2 - 17 + 9 * x ** 12)) '((* 9 (** X 12)) -17 (* -4 (** X 2)) (* 1 (** X 3))))
+   (equal (infix-to-prefix '(2 + x ** 2 + 9 * x - 4 * x ** 2)) '((* -4 (** X 2)) (* 9 (** X 1)) (* 1 (** X 2)) 2))
+   (equal (infix-to-prefix '(2 + x ** 2 + 9 * x - 4 * x ** 2 + 4 - x)) '((* -1 (** X 1)) 4 (* -4 (** X 2)) (* 9 (** X 1)) (* 1 (** X 2)) 2))))
+
 (defun process-prefix (terms)
   (let ((term-map (make-hash-table))
         (degree 0))
@@ -140,25 +150,49 @@
             (t (error "Huh?"))))
     (loop for power from 0 upto degree collect (gethash power term-map 0))))
 
-(defun print-power (n)
+(deftest test-process-prefix ()
+  (check
+   (equal (process-prefix (infix-to-prefix '(55))) '(55))
+   (equal (process-prefix (infix-to-prefix '(-34 * x))) '(0 -34))
+   (equal (process-prefix (infix-to-prefix '(3 * x ** 2 + 7 * x + 8))) '(8 7 3))
+   (equal (process-prefix (infix-to-prefix '(x ** 3 - 5 * x ** 2 - 17))) '(-17 0 -5 1))
+   (equal (process-prefix (infix-to-prefix '(x ** 3 - 4 * x ** 2 - 17 + 9 * x ** 12))) '(-17 0 -4 1 0 0 0 0 0 0 0 0 9))
+   (equal (process-prefix (infix-to-prefix '(2 + x ** 2 + 9 * x - 4 * x ** 2))) '(2 9 -3))
+   (equal (process-prefix (infix-to-prefix '(2 + x ** 2 + 9 * x - 4 * x ** 2 + 4 - x))) '(6 8 -3))))
+
+(defun print-power (s n)
   (cond ((> n 10) 
-         (print-power (floor n 10))
-         (print-power (mod n 10)))
-        (t (format t "~C" (char *superscripts* n)))) )
+         (print-power s (floor n 10))
+         (print-power s (mod n 10)))
+        (t (format s "~C" (char *superscripts* n)))) )
 
 (defun print-poly (coefficients)
-  (let ((n (1- (length coefficients))))
-    (loop for i from n downto 0
-          for coeff in (reverse coefficients)
-          unless (zerop coeff)
-          do (cond ((minusp coeff) (unless (= i n) (format t " - ")) (print-term (- coeff) i))
-                   (t (unless (= i n) (format t " + ")) (print-term coeff i)))) ))
+  (with-output-to-string (s)
+    (let ((n (1- (length coefficients))))
+      (loop for i from n downto 0
+            for coeff in (reverse coefficients)
+            unless (zerop coeff)
+            do (cond ((minusp coeff) 
+                      (if (= i n)
+                          (format s "-")
+                          (format s " - "))
+                      (print-term s (- coeff) i))
+                     (t (unless (= i n) (format s " + ")) (print-term s coeff i)))) )))
 
-(defun print-term (coeff i)
+(defun print-term (s coeff i)
   (case i
-    (0 (format t "~D" coeff))
-    (1 (format t "~Dx" coeff))
-    (otherwise (format t "~Dx" coeff)
-               (print-power i))))
+    (0 (format s "~D" coeff))
+    (1 (format s "~[~;~:;~:*~D~]x" coeff))
+    (otherwise (format s "~[~;~:;~:*~D~]x" coeff)
+               (print-power s i))))
 
+(deftest test-print-poly ()
+  (check
+   (equal (print-poly (process-prefix (infix-to-prefix '(55)))) "55")
+   (equal (print-poly (process-prefix (infix-to-prefix '(-34 * x)))) "-34x")
+   (equal (print-poly (process-prefix (infix-to-prefix '(3 * x ** 2 + 7 * x + 8)))) "3x² + 7x + 8")
+   (equal (print-poly (process-prefix (infix-to-prefix '(x ** 3 - 5 * x ** 2 - 17)))) "x³ - 5x² - 17")
+   (equal (print-poly (process-prefix (infix-to-prefix '(x ** 3 - 4 * x ** 2 - 17 + 9 * x ** 12)))) "9x¹² + x³ - 4x² - 17")
+   (equal (print-poly (process-prefix (infix-to-prefix '(2 + x ** 2 + 9 * x - 4 * x ** 2)))) "-3x² + 9x + 2")
+   (equal (print-poly (process-prefix (infix-to-prefix '(2 + x ** 2 + 9 * x - 4 * x ** 2 + 4 - x)))) "-3x² + 8x + 6")))
 
